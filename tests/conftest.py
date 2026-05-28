@@ -2,6 +2,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.documents import Document
+from langchain_core.language_models import FakeListChatModel
+
+
+class FakeListChatModelWithTools(FakeListChatModel):
+    """FakeListChatModel that accepts bind_tools without raising NotImplementedError."""
+
+    def bind_tools(self, tools, **kwargs):
+        return self
 
 
 class FakeEmbeddings:

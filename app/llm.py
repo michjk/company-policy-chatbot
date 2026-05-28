@@ -21,6 +21,7 @@ def build_chat_model() -> BaseChatModel:
         return ChatOllama(
             base_url=settings.ollama_base_url,
             model=settings.ollama_chat_model,
+            streaming=True,
         )
     elif provider == "lmstudio":
         from langchain_openai import ChatOpenAI

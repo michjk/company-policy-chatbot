@@ -1,3 +1,6 @@
+from typing import Literal
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,6 +36,7 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 150
     retrieval_k: int = 4
+    retrieval_search_type: Literal["similarity", "mmr"] = "similarity"
 
     # LangSmith observability
     langsmith_api_key: str = ""
@@ -41,6 +45,13 @@ class Settings(BaseSettings):
     # OpenTelemetry observability
     otel_exporter_otlp_endpoint: str = ""
     otel_service_name: str = "company-policy-chatbot"
+
+    @field_validator("chunk_size", "retrieval_k", "embedding_dim")
+    @classmethod
+    def must_be_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("must be positive")
+        return v
 
     @property
     def sqlalchemy_url(self) -> str:

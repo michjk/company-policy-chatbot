@@ -24,7 +24,13 @@ async def lifespan(app: FastAPI):
     async with lifespan_checkpointer() as checkpointer:
         vs = build_vectorstore()
         await init_vectorstore(vs)
-        retriever = vs.as_retriever(search_kwargs={"k": settings.retrieval_k})
+        search_kwargs: dict = {"k": settings.retrieval_k}
+        if settings.retrieval_search_type == "mmr":
+            search_kwargs["fetch_k"] = settings.retrieval_k * 3
+        retriever = vs.as_retriever(
+            search_type=settings.retrieval_search_type,
+            search_kwargs=search_kwargs,
+        )
         graph = build_rag_graph(retriever, checkpointer)
 
         resources.vectorstore = vs

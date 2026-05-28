@@ -4,6 +4,36 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
+from tests.conftest import FakeListChatModelWithTools
+
+
+class _FakeLLMWithToolCall:
+    """Fake LLM that emits a retrieve tool call on the first invocation, then answers."""
+
+    def __init__(self, answer: str, tool_name: str):
+        self._answer = answer
+        self._tool_name = tool_name
+        self._calls = 0
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    async def ainvoke(self, messages):
+        self._calls += 1
+        if self._calls == 1:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": self._tool_name,
+                        "args": {"query": "policy query"},
+                        "id": "call_test_abc",
+                        "type": "tool_call",
+                    }
+                ],
+            )
+        return AIMessage(content=self._answer)
+
 
 @pytest.fixture
 def memory_checkpointer():
@@ -19,9 +49,7 @@ def fixed_retriever(sample_docs):
 
 @pytest.fixture
 def stub_llm():
-    from langchain_core.language_models import FakeListChatModel
-
-    return FakeListChatModel(responses=["Employees get 15 days PTO."])
+    return FakeListChatModelWithTools(responses=["Employees get 15 days PTO."])
 
 
 @pytest.mark.asyncio
@@ -49,15 +77,11 @@ async def test_rag_graph_returns_answer(
 
 @pytest.mark.asyncio
 async def test_rag_graph_preserves_history(
-    fixed_retriever, memory_checkpointer, stub_llm, monkeypatch
+    fixed_retriever, memory_checkpointer, monkeypatch
 ):
     from app import rag_graph
 
-    monkeypatch.setattr(rag_graph, "build_chat_model", lambda: stub_llm)
-
-    from langchain_core.language_models import FakeListChatModel
-
-    stub_llm2 = FakeListChatModel(
+    stub_llm2 = FakeListChatModelWithTools(
         responses=["Employees get 15 days PTO.", "New hires get 5 days."]
     )
     monkeypatch.setattr(rag_graph, "build_chat_model", lambda: stub_llm2)
@@ -83,13 +107,13 @@ async def test_rag_graph_preserves_history(
 
 @pytest.mark.asyncio
 async def test_rag_graph_citations_contain_sources(
-    fixed_retriever, memory_checkpointer, stub_llm, monkeypatch, sample_docs
+    fixed_retriever, memory_checkpointer, monkeypatch, sample_docs
 ):
     from app import rag_graph
+    from app.rag_graph import RETRIEVE_TOOL_NAME, build_rag_graph
 
-    monkeypatch.setattr(rag_graph, "build_chat_model", lambda: stub_llm)
-
-    from app.rag_graph import build_rag_graph
+    fake_llm = _FakeLLMWithToolCall("Employees get 15 days PTO.", RETRIEVE_TOOL_NAME)
+    monkeypatch.setattr(rag_graph, "build_chat_model", lambda: fake_llm)
 
     graph = build_rag_graph(fixed_retriever, memory_checkpointer)
 

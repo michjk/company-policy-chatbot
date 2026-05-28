@@ -2,18 +2,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from langchain_core.language_models import FakeListChatModel
 from langgraph.checkpoint.memory import MemorySaver
 
 from app import rag_graph as rg
 from app.api import app
 from app.deps import get_graph, get_vectorstore
 from app.rag_graph import build_rag_graph
+from tests.conftest import FakeListChatModelWithTools
 
 
 @pytest.fixture
 def stub_llm():
-    return FakeListChatModel(responses=["PTO is 15 days per year."] * 20)
+    return FakeListChatModelWithTools(responses=["PTO is 15 days per year."] * 20)
 
 
 @pytest.fixture
