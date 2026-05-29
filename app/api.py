@@ -1,3 +1,4 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,12 +14,66 @@ from .deps import GraphDep, VectorstoreDep, resources
 from .ingestion import ingest_files
 from .observability import setup_observability
 from .rag_graph import build_rag_graph
-from .streaming import register_streaming_endpoint
+from .streaming import register_copilotkit_endpoint, register_streaming_endpoint
 from .vectorstore import build_vectorstore, init_vectorstore
+
+# ── Response schemas ──────────────────────────────────────────────────────────
+
+
+class HealthResponse(BaseModel):
+    status: str
+
+
+class IngestFileReport(BaseModel):
+    filename: str
+    chunks: int
+    doc_id: str | None
+
+
+class IngestResponse(BaseModel):
+    files: list[IngestFileReport]
+    chunks_total: int
+
+
+class DocumentEntry(BaseModel):
+    filename: str
+    doc_id: str
+    uploaded_at: str
+
+
+class DocumentsResponse(BaseModel):
+    documents: list[DocumentEntry]
+
+
+class Citation(BaseModel):
+    source: str
+    chunk: int
+    doc_id: str
+
+
+class ChatResponse(BaseModel):
+    session_id: str
+    answer: str
+    citations: list[Citation]
+
+
+class MessageEntry(BaseModel):
+    role: str
+    content: str
+
+
+class SessionHistoryResponse(BaseModel):
+    session_id: str
+    messages: list[MessageEntry]
+
+
+class ChatRequest(BaseModel):
+    session_id: str
+    message: str
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_observability(app)
 
     async with lifespan_checkpointer() as checkpointer:
@@ -37,6 +92,7 @@ async def lifespan(app: FastAPI):
         resources.graph = graph
 
         register_streaming_endpoint(app, graph, path="/chat/stream")
+        register_copilotkit_endpoint(app, graph, path="/copilotkit")
         yield
 
 
@@ -51,16 +107,18 @@ app = FastAPI(
 # ── Health ──────────────────────────────────────────────────────────────────
 
 
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+@app.get("/health", tags=["health"])
+async def health() -> HealthResponse:
+    return HealthResponse(status="ok")
 
 
 # ── Documents ────────────────────────────────────────────────────────────────
 
 
-@app.post("/documents/ingest")
-async def ingest_documents(files: list[UploadFile], vs: VectorstoreDep):
+@app.post("/documents/ingest", status_code=201, tags=["documents"])
+async def ingest_documents(
+    files: list[UploadFile], vs: VectorstoreDep
+) -> IngestResponse:
     if not files:
         raise HTTPException(status_code=422, detail="At least one file is required.")
     allowed = {".txt", ".md"}
@@ -73,11 +131,14 @@ async def ingest_documents(files: list[UploadFile], vs: VectorstoreDep):
     raw_files = [(f.filename or "unknown", await f.read()) for f in files]
     reports = await ingest_files(vs, raw_files)
     total_chunks = sum(r["chunks"] for r in reports)
-    return {"files": reports, "chunks_total": total_chunks}
+    return IngestResponse(
+        files=[IngestFileReport(**r) for r in reports],
+        chunks_total=total_chunks,
+    )
 
 
-@app.get("/documents")
-async def list_documents(vs: VectorstoreDep):
+@app.get("/documents", tags=["documents"])
+async def list_documents(vs: VectorstoreDep) -> DocumentsResponse:
     EmbeddingStore, _ = _get_embedding_collection_store(vs._embedding_length)
     async with vs._make_async_session() as session:
         result = await session.execute(
@@ -90,16 +151,18 @@ async def list_documents(vs: VectorstoreDep):
             ).distinct(EmbeddingStore.cmetadata["doc_id"])
         )
         rows = result.all()
-    return {
-        "documents": [
-            {"filename": r.filename, "doc_id": r.doc_id, "uploaded_at": r.uploaded_at}
+    return DocumentsResponse(
+        documents=[
+            DocumentEntry(
+                filename=r.filename, doc_id=r.doc_id, uploaded_at=r.uploaded_at
+            )
             for r in rows
         ]
-    }
+    )
 
 
-@app.delete("/documents/{doc_id}", status_code=204)
-async def delete_document(doc_id: str, vs: VectorstoreDep):
+@app.delete("/documents/{doc_id}", status_code=204, tags=["documents"])
+async def delete_document(doc_id: str, vs: VectorstoreDep) -> None:
     EmbeddingStore, _ = _get_embedding_collection_store(vs._embedding_length)
     async with vs._make_async_session() as session:
         result = await session.execute(
@@ -116,41 +179,36 @@ async def delete_document(doc_id: str, vs: VectorstoreDep):
 # ── Chat ─────────────────────────────────────────────────────────────────────
 
 
-class ChatRequest(BaseModel):
-    session_id: str
-    message: str
-
-
-@app.post("/chat")
-async def chat(req: ChatRequest, graph: GraphDep):
+@app.post("/chat", tags=["chat"])
+async def chat(req: ChatRequest, graph: GraphDep) -> ChatResponse:
     config = {"configurable": {"thread_id": req.session_id}}
     result = await graph.ainvoke(
         {"messages": [HumanMessage(content=req.message)]},
         config=config,
     )
     ai_msg = result["messages"][-1]
-    citations = ai_msg.response_metadata.get("citations", [])
-    return {
-        "session_id": req.session_id,
-        "answer": ai_msg.content,
-        "citations": citations,
-    }
+    raw_citations = ai_msg.response_metadata.get("citations", [])
+    return ChatResponse(
+        session_id=req.session_id,
+        answer=ai_msg.content,
+        citations=[Citation(**c) for c in raw_citations],
+    )
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
 
-@app.get("/sessions/{session_id}/history")
-async def session_history(session_id: str, graph: GraphDep):
+@app.get("/sessions/{session_id}/history", tags=["sessions"])
+async def session_history(session_id: str, graph: GraphDep) -> SessionHistoryResponse:
     config = {"configurable": {"thread_id": session_id}}
     state = await graph.aget_state(config)
-    if state is None:
+    if not state.values:
         raise HTTPException(status_code=404, detail="Session not found.")
     messages = state.values.get("messages", [])
-    return {
-        "session_id": session_id,
-        "messages": [
-            {"role": getattr(m, "type", "unknown"), "content": m.content}
+    return SessionHistoryResponse(
+        session_id=session_id,
+        messages=[
+            MessageEntry(role=getattr(m, "type", "unknown"), content=m.content)
             for m in messages
         ],
-    }
+    )

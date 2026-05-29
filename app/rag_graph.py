@@ -1,11 +1,13 @@
-from typing import Annotated, Any
+from typing import Annotated
 
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.retrievers import BaseRetriever
 from langchain_core.tools import tool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.graph.state import CompiledStateGraph
 from typing_extensions import TypedDict
 
 from .llm import build_chat_model
@@ -25,7 +27,9 @@ class RAGState(TypedDict):
     context: list[Document]
 
 
-def build_rag_graph(retriever: Any, checkpointer: BaseCheckpointSaver):
+def build_rag_graph(
+    retriever: BaseRetriever, checkpointer: BaseCheckpointSaver
+) -> CompiledStateGraph:
     llm = build_chat_model()
 
     @tool(response_format="content_and_artifact")

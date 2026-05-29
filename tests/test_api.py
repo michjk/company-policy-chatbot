@@ -57,7 +57,7 @@ async def test_ingest_documents(client):
             )
         ]
         resp = await c.post("/documents/ingest", files=files)
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     body = resp.json()
     assert "files" in body
     assert body["chunks_total"] >= 1
