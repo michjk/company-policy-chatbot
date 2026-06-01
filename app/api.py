@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import HumanMessage
 from langchain_postgres.vectorstores import _get_embedding_collection_store
 from pydantic import BaseModel
@@ -14,7 +15,7 @@ from .deps import GraphDep, VectorstoreDep, resources
 from .ingestion import ingest_files
 from .observability import setup_observability
 from .rag_graph import build_rag_graph
-from .streaming import register_copilotkit_endpoint, register_streaming_endpoint
+from .streaming import register_streaming_endpoint
 from .vectorstore import build_vectorstore, init_vectorstore
 
 # ── Response schemas ──────────────────────────────────────────────────────────
@@ -92,7 +93,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         resources.graph = graph
 
         register_streaming_endpoint(app, graph, path="/chat/stream")
-        register_copilotkit_endpoint(app, graph, path="/copilotkit")
         yield
 
 
@@ -101,6 +101,14 @@ app = FastAPI(
     description="RAG chatbot for company policy Q&A. Streaming via AG-UI protocol.",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     retrieval_k: int = 4
     retrieval_search_type: Literal["similarity", "mmr"] = "similarity"
 
+    # CORS
+    cors_origins: list[str] = ["*"]
+
     # LangSmith observability
     langsmith_api_key: str = ""
     langsmith_tracing: bool = True

@@ -66,11 +66,14 @@ def build_rag_graph(
         docs = state.get("context", [])
         citations = [
             {
-                "source": d.metadata.get("filename", "unknown"),
-                "chunk": d.metadata.get("chunk_index", 0),
-                "doc_id": d.metadata.get("doc_id", ""),
+                "source": meta.get("filename", "unknown"),
+                "chunk": meta.get("chunk_index", 0),
+                "doc_id": meta.get("doc_id", ""),
             }
             for d in docs
+            for meta in [
+                d.metadata if hasattr(d, "metadata") else d.get("metadata", {})
+            ]
         ]
         last_msg = state["messages"][-1]
         updated = AIMessage(
