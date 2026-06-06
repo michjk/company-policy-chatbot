@@ -18,6 +18,9 @@ from .rag_graph import build_rag_graph
 from .streaming import register_streaming_endpoint
 from .vectorstore import build_vectorstore, init_vectorstore
 
+# PydanticAI backend imports (loaded conditionally at runtime to avoid hard dependency)
+# These are imported inside the lifespan/helpers when agent_backend == "pydantic_ai"
+
 # ── Response schemas ──────────────────────────────────────────────────────────
 
 
@@ -77,23 +80,35 @@ class ChatRequest(BaseModel):
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_observability(app)
 
-    async with lifespan_checkpointer() as checkpointer:
-        vs = build_vectorstore()
-        await init_vectorstore(vs)
-        search_kwargs: dict = {"k": settings.retrieval_k}
-        if settings.retrieval_search_type == "mmr":
-            search_kwargs["fetch_k"] = settings.retrieval_k * 3
-        retriever = vs.as_retriever(
-            search_type=settings.retrieval_search_type,
-            search_kwargs=search_kwargs,
-        )
-        graph = build_rag_graph(retriever, checkpointer)
+    vs = build_vectorstore()
+    await init_vectorstore(vs)
+    search_kwargs: dict = {"k": settings.retrieval_k}
+    if settings.retrieval_search_type == "mmr":
+        search_kwargs["fetch_k"] = settings.retrieval_k * 3
+    retriever = vs.as_retriever(
+        search_type=settings.retrieval_search_type,
+        search_kwargs=search_kwargs,
+    )
+    resources.vectorstore = vs
+    resources.retriever = retriever
 
-        resources.vectorstore = vs
-        resources.graph = graph
+    if settings.agent_backend == "pydantic_ai":
+        from .pydantic_ai_agent import build_pydantic_agent
+        from .pydantic_ai_sessions import lifespan_session_store
+        from .pydantic_ai_streaming import register_pydantic_streaming
 
-        register_streaming_endpoint(app, graph, path="/chat/stream")
-        yield
+        async with lifespan_session_store() as session_store:
+            agent = build_pydantic_agent()
+            resources.pydantic_agent = agent
+            resources.session_store = session_store
+            register_pydantic_streaming(app, agent, retriever)
+            yield
+    else:
+        async with lifespan_checkpointer() as checkpointer:
+            graph = build_rag_graph(retriever, checkpointer)
+            resources.graph = graph
+            register_streaming_endpoint(app, graph, path="/chat/stream")
+            yield
 
 
 app = FastAPI(
@@ -189,6 +204,11 @@ async def delete_document(doc_id: str, vs: VectorstoreDep) -> None:
 
 @app.post("/chat", tags=["chat"])
 async def chat(req: ChatRequest, graph: GraphDep) -> ChatResponse:
+    if settings.agent_backend == "pydantic_ai":
+        return await _pydantic_ai_chat(req)
+    assert graph is not None, (
+        "graph is None — lifespan did not initialise LangGraph backend"
+    )
     config = {"configurable": {"thread_id": req.session_id}}
     result = await graph.ainvoke(
         {"messages": [HumanMessage(content=req.message)]},
@@ -203,11 +223,41 @@ async def chat(req: ChatRequest, graph: GraphDep) -> ChatResponse:
     )
 
 
+async def _pydantic_ai_chat(req: ChatRequest) -> ChatResponse:
+    from .pydantic_ai_agent import AgentDeps
+
+    agent = resources.pydantic_agent
+    session_store = resources.session_store
+    deps = AgentDeps(retriever=resources.retriever)
+    history = await session_store.load(req.session_id)
+    # NOTE: load→run→save is not atomic. Concurrent requests on the same session_id
+    # can race and the second save will overwrite the first, silently losing a turn.
+    # Acceptable for single-user sessions; fix with SELECT FOR UPDATE if multi-user
+    # concurrent access on the same session becomes a requirement.
+    result = await agent.run(
+        req.message, deps=deps, message_history=history if history else None
+    )
+    await session_store.save(req.session_id, result.all_messages())
+    return ChatResponse(
+        session_id=req.session_id,
+        answer=result.output,
+        citations=[
+            Citation(source=c.source, chunk=c.chunk, doc_id=c.doc_id)
+            for c in deps.citations
+        ],
+    )
+
+
 # ── Sessions ──────────────────────────────────────────────────────────────────
 
 
 @app.get("/sessions/{session_id}/history", tags=["sessions"])
 async def session_history(session_id: str, graph: GraphDep) -> SessionHistoryResponse:
+    if settings.agent_backend == "pydantic_ai":
+        return await _pydantic_ai_session_history(session_id)
+    assert graph is not None, (
+        "graph is None — lifespan did not initialise LangGraph backend"
+    )
     config = {"configurable": {"thread_id": session_id}}
     state = await graph.aget_state(config)
     if not state.values:
@@ -220,3 +270,34 @@ async def session_history(session_id: str, graph: GraphDep) -> SessionHistoryRes
             for m in messages
         ],
     )
+
+
+async def _pydantic_ai_session_history(session_id: str) -> SessionHistoryResponse:
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        UserPromptPart,
+    )
+
+    session_store = resources.session_store
+    all_messages = await session_store.load(session_id)
+    if not all_messages:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    entries: list[MessageEntry] = []
+    for msg in all_messages:
+        if isinstance(msg, ModelRequest):
+            for part in msg.parts:
+                if isinstance(part, UserPromptPart):
+                    content = (
+                        part.content
+                        if isinstance(part.content, str)
+                        else str(part.content)
+                    )
+                    entries.append(MessageEntry(role="human", content=content))
+        elif isinstance(msg, ModelResponse):
+            for part in msg.parts:
+                if isinstance(part, TextPart):
+                    entries.append(MessageEntry(role="ai", content=part.content))
+    return SessionHistoryResponse(session_id=session_id, messages=entries)

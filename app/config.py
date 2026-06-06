@@ -7,6 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # Agent backend: "langgraph" (default) or "pydantic_ai"
+    agent_backend: Literal["langgraph", "pydantic_ai"] = "langgraph"
+
     # LLM provider
     llm_provider: str = "openrouter"
 

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends
 from langchain_postgres import PGVector
@@ -10,6 +10,9 @@ from langgraph.graph.state import CompiledStateGraph
 class AppResources:
     vectorstore: PGVector | None = field(default=None)
     graph: CompiledStateGraph | None = field(default=None)
+    retriever: Any = field(default=None)
+    pydantic_agent: Any = field(default=None)
+    session_store: Any = field(default=None)
 
 
 resources = AppResources()
