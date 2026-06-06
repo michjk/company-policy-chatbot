@@ -1,8 +1,9 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic_ai.models.test import TestModel
 
+from app import pydantic_ai_agent as pa_module
 from app.pydantic_ai_agent import AgentDeps, Citation, build_pydantic_agent
 
 
@@ -15,7 +16,8 @@ def retriever(sample_docs):
 
 @pytest.fixture
 def agent():
-    return build_pydantic_agent()
+    with patch.object(pa_module, "build_pydantic_model", return_value=TestModel()):
+        return build_pydantic_agent()
 
 
 @pytest.mark.asyncio
