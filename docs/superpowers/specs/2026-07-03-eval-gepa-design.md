@@ -44,7 +44,12 @@ The pipeline runs in three sequential steps, each an independent script:
 generate_dataset → optimize (GEPA) → export_prompts
 ```
 
-All steps require the same services as the app: Postgres + pgvector + Ollama embeddings. The app itself does not need to be running (scripts connect to the database and LLM directly).
+Service requirements per step:
+- `generate_dataset` — Postgres + pgvector (chunk fetch) + LLM (Q&A generation)
+- `optimize` — Postgres + pgvector (retriever) + Ollama embeddings + LLM (GEPA + judge)
+- `export_prompts` — no services needed (reads local JSON, writes local file)
+
+The FastAPI app process does not need to be running — scripts connect to the database and LLM directly.
 
 The DSPy program mirrors the shared RAG logic used by both backends:
 
@@ -60,7 +65,7 @@ GEPA optimizes the instructions in all three modules. The compiled output is pro
 
 ### Fetch
 
-Connects to pgvector via `app.vectorstore` and pulls stored chunks. Uses a broad similarity search or full scan to retrieve all distinct chunks up to `DATASET_MAX_CHUNKS`.
+Connects to the pgvector Postgres database via SQLAlchemy (using `app.config.sqlalchemy_url`) and queries the embeddings table directly with `SELECT DISTINCT ON (doc_id) ...` to retrieve one representative chunk per document, up to `DATASET_MAX_CHUNKS`. This avoids needing an embedding model at dataset-generation time.
 
 ### Generate
 
@@ -193,7 +198,7 @@ eval:        # eval-data → eval-opt → eval-export
 ## What changes in `app/`
 
 - `app/prompts.py` — gains two new constants (`QUERY_REFORMULATION_PROMPT`, `CITATION_EXTRACTION_PROMPT`); existing `RAG_SYSTEM_PROMPT` updated by export step
-- `app/rag_graph.py` — `agent` node passes `QUERY_REFORMULATION_PROMPT` before retrieval; `finalize` node uses `CITATION_EXTRACTION_PROMPT`
+- `app/rag_graph.py` — `tools` node (where `retrieve_context` executes) uses `QUERY_REFORMULATION_PROMPT` to reformulate the question before calling the retriever; `finalize` node uses `CITATION_EXTRACTION_PROMPT`
 - `app/pydantic_ai_agent.py` — `retrieve_context` tool uses `QUERY_REFORMULATION_PROMPT`; citation accumulation uses `CITATION_EXTRACTION_PROMPT`
 
 No changes to API endpoints, streaming, session persistence, or vectorstore.
