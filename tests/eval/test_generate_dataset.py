@@ -69,7 +69,10 @@ def test_main_writes_json(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     os.makedirs("eval/data", exist_ok=True)
 
-    with patch("psycopg.connect", return_value=_make_mock_conn(rows)):
+    with (
+        patch("psycopg.connect", return_value=_make_mock_conn(rows)),
+        patch("eval.generate_dataset.configure_dspy_lm"),
+    ):
         from eval import generate_dataset
 
         # reload so monkeypatched chdir takes effect
