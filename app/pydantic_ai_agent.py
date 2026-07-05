@@ -3,7 +3,11 @@ from typing import Any
 
 from pydantic_ai import Agent, RunContext
 
-from .prompts import RAG_SYSTEM_PROMPT
+from .prompts import (
+    CITATION_EXTRACTION_PROMPT,
+    QUERY_REFORMULATION_PROMPT,
+    RAG_SYSTEM_PROMPT,
+)
 from .pydantic_ai_llm import build_pydantic_model
 
 
@@ -24,11 +28,17 @@ def build_pydantic_agent() -> Agent[AgentDeps, str]:
     # output_type=str (not a Pydantic model) keeps streaming natural — the AG-UI protocol
     # expects plain text tokens, not JSON. The API response type safety is enforced at the
     # ChatResponse layer in api.py. Citations come from deps.citations (accurate), not LLM output.
+    _prompt_parts = [RAG_SYSTEM_PROMPT]
+    if QUERY_REFORMULATION_PROMPT:
+        _prompt_parts.append(QUERY_REFORMULATION_PROMPT)
+    if CITATION_EXTRACTION_PROMPT:
+        _prompt_parts.append(CITATION_EXTRACTION_PROMPT)
+
     agent: Agent[AgentDeps, str] = Agent(
         build_pydantic_model(),
         deps_type=AgentDeps,
         output_type=str,
-        system_prompt=RAG_SYSTEM_PROMPT,
+        system_prompt="\n\n".join(_prompt_parts),
     )
 
     @agent.tool

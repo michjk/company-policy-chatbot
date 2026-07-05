@@ -11,7 +11,11 @@ from langgraph.graph.state import CompiledStateGraph
 from typing_extensions import TypedDict
 
 from .llm import build_chat_model
-from .prompts import RAG_SYSTEM_PROMPT
+from .prompts import (
+    CITATION_EXTRACTION_PROMPT,
+    QUERY_REFORMULATION_PROMPT,
+    RAG_SYSTEM_PROMPT,
+)
 
 RETRIEVE_TOOL_NAME = "retrieve_context"  # must match the decorated function name below
 
@@ -40,7 +44,12 @@ def build_rag_graph(
     llm_with_tools = llm.bind_tools([retrieve_tool])
 
     async def agent(state: RAGState) -> dict:
-        messages = [SystemMessage(content=RAG_SYSTEM_PROMPT)] + list(state["messages"])
+        parts = [RAG_SYSTEM_PROMPT]
+        if QUERY_REFORMULATION_PROMPT:
+            parts.append(QUERY_REFORMULATION_PROMPT)
+        if CITATION_EXTRACTION_PROMPT:
+            parts.append(CITATION_EXTRACTION_PROMPT)
+        messages = [SystemMessage(content="\n\n".join(parts))] + list(state["messages"])
         response = await llm_with_tools.ainvoke(messages)
         return {"messages": [response]}
 
