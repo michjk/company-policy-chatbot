@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 import dspy
 from dspy import Example, Prediction
@@ -22,9 +22,9 @@ def _build_retriever() -> Any:
 def _gepa_metric(
     gold: Example,
     pred: Prediction,
-    trace: Optional[Any] = None,
-    pred_name: Optional[str] = None,
-    pred_trace: Optional[Any] = None,
+    trace: Any = None,
+    pred_name: str | None = None,
+    pred_trace: Any = None,
 ) -> float:
     """Adapter wrapping combined_score to satisfy GEPAFeedbackMetric protocol."""
     return combined_score(gold, pred, trace)
@@ -65,6 +65,7 @@ def main() -> None:
         metric=_gepa_metric,
         reflection_minibatch_size=GEPA_BREADTH,
         max_full_evals=GEPA_DEPTH,
+        reflection_lm=dspy.settings.lm,
     )
 
     print(

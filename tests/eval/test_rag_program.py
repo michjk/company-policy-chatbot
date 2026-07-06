@@ -18,6 +18,8 @@ def dummy_lm():
         ]
     )
     dspy.configure(lm=lm)
+    yield
+    dspy.settings.configure(lm=None)
 
 
 @pytest.fixture

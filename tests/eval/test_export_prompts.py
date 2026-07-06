@@ -27,7 +27,10 @@ def _make_mock_program(
     reformulate.signature = _sig(query_instr)
 
     generate = MagicMock()
-    generate.signature = _sig(rag_instr)
+    generate.predict = MagicMock()
+    generate.predict.signature = _sig(rag_instr)
+    # Prevent .signature from matching (ChainOfThought path only)
+    del generate.signature
 
     cite = MagicMock()
     cite.signature = _sig(cite_instr)

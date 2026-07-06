@@ -7,27 +7,32 @@ from unittest.mock import MagicMock
 
 from eval.rag_program import PolicyRAG
 
-_PROMPTS_PY_TEMPLATE = '''\
-RAG_SYSTEM_PROMPT = """\\\n{rag}\\\n"""
-
-QUERY_REFORMULATION_PROMPT = """\\\n{query}\\\n"""
-
-CITATION_EXTRACTION_PROMPT = """\\\n{citation}\\\n"""
-'''
-
 _DEFAULT_OUTPUT = "app/prompts.py"
 _DEFAULT_COMPILED = "eval/compiled/optimized_rag.json"
 
 
 def _get_instructions(module: Any) -> str:
     """Extract optimized instruction string from a compiled DSPy Predict/ChainOfThought module."""
-    for attr in ("extended_signature", "signature"):
-        sig = getattr(module, attr, None)
-        if sig is not None:
-            instr = getattr(sig, "instructions", None)
-            if isinstance(instr, str) and instr:
-                return instr
+    for getter in [
+        lambda m: m.extended_signature.instructions,
+        lambda m: m.signature.instructions,
+        lambda m: m.predict.signature.instructions,  # ChainOfThought wraps a Predict
+    ]:
+        try:
+            result = getter(module)
+            if isinstance(result, str) and result:
+                return result
+        except AttributeError:
+            continue
     return ""
+
+
+def _build_prompts_content(rag: str, query: str, citation: str) -> str:
+    return (
+        f"RAG_SYSTEM_PROMPT = {repr(rag)}\n\n"
+        f"QUERY_REFORMULATION_PROMPT = {repr(query)}\n\n"
+        f"CITATION_EXTRACTION_PROMPT = {repr(citation)}\n"
+    )
 
 
 def _load_compiled_program(compiled_path: str) -> PolicyRAG:
@@ -48,11 +53,7 @@ def export(
     query_instr = _get_instructions(program.reformulate)
     citation_instr = _get_instructions(program.cite)
 
-    new_content = _PROMPTS_PY_TEMPLATE.format(
-        rag=rag_instr,
-        query=query_instr,
-        citation=citation_instr,
-    )
+    new_content = _build_prompts_content(rag_instr, query_instr, citation_instr)
 
     print("=== Proposed app/prompts.py ===")
     print(new_content)
