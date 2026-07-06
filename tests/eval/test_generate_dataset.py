@@ -75,10 +75,6 @@ def test_main_writes_json(tmp_path, monkeypatch):
     ):
         from eval import generate_dataset
 
-        # reload so monkeypatched chdir takes effect
-        import importlib
-
-        importlib.reload(generate_dataset)
         generate_dataset.main()
 
     with open("eval/data/synthetic_dataset.json") as f:
