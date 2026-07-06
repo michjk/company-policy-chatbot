@@ -16,3 +16,7 @@ wheels/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Eval pipeline artifacts
+eval/data/
+eval/compiled/

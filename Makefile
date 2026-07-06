@@ -1,4 +1,4 @@
-.PHONY: install test lint format typecheck check dev up down logs
+.PHONY: install test lint format typecheck check dev up down logs eval-data eval-opt eval-export eval
 
 install:
 	uv sync
@@ -32,3 +32,15 @@ down:
 
 logs:
 	docker compose logs -f app
+
+eval-data:
+	uv run python -m eval.generate_dataset
+
+eval-opt:
+	uv run python -m eval.optimize
+
+eval-export:
+	uv run python -m eval.export_prompts
+
+eval:
+	$(MAKE) eval-data && $(MAKE) eval-opt && $(MAKE) eval-export
